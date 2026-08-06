@@ -1,7 +1,7 @@
 // Serverless function: recebe vaga + currículo, chama o Gemini e devolve o JSON da análise.
 // A chave nunca chega ao navegador — fica em process.env.GEMINI_API_KEY.
 
-const MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const MODEL_CANDIDATES = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash-lite', 'gemini-pro-latest'];
 
 function buildPrompt(job, cvText, cvName) {
   return `Você é um especialista sênior em recrutamento tech/administrativo e benchmark salarial (Glassdoor, Levels.fyi, pesquisas Robert Half/Catho). Data de referência: ${new Date().toLocaleDateString('pt-BR')}.
@@ -37,27 +37,43 @@ ${job.slice(0, 12000)}
 ${cvText.slice(0, 12000)}`;
 }
 
-async function callGemini(key, prompt) {
-  const base = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-  const body = JSON.stringify({
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' }
-  });
+async function callGeminiModel(key, prompt, model) {
+    const base = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    const body = JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' }
+    });
 
-// A GEMINI_API_KEY é sempre uma chave de API do AI Studio — envia sempre via query string.
+    // A GEMINI_API_KEY é sempre uma chave de API do AI Studio — envia sempre via query string.
     const url = `${base}?key=${encodeURIComponent(key)}`;
     const headers = { 'Content-Type': 'application/json' };
 
-  const r = await fetch(url, { method: 'POST', headers, body });
-  const data = await r.json().catch(() => ({}));
+    const r = await fetch(url, { method: 'POST', headers, body });
+    const data = await r.json().catch(() => ({}));
 
-  if (!r.ok) {
-    const msg = data?.error?.message || `HTTP ${r.status}`;
-    const err = new Error(msg);
-    err.status = r.status;
-    throw err;
-  }
-  return data?.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
+    if (!r.ok) {
+          const msg = data?.error?.message || `HTTP ${r.status}`;
+          const err = new Error(msg);
+          err.status = r.status;
+          throw err;
+    }
+    return data?.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
+}
+
+// Tenta cada modelo de MODEL_CANDIDATES até um funcionar (sem modelo fixo).
+// Erros de autenticacao (401/403) interrompem na hora, pois afetam qualquer modelo.
+// Erros de modelo indisponivel (404) ou cota excedida (429) tentam o proximo modelo.
+async function callGemini(key, prompt) {
+    let lastErr;
+    for (const model of MODEL_CANDIDATES) {
+          try {
+                  return await callGeminiModel(key, prompt, model);
+          } catch (e) {
+                  lastErr = e;
+                  if (e.status === 401 || e.status === 403) throw e;
+          }
+    }
+    throw lastErr;
 }
 
 // Diagnostico: GET /api/analyze?health=1
@@ -83,7 +99,7 @@ async function health(res) {
     formato,
     prefixo: key.slice(0, 6) + '...',
     tamanho: key.length,
-    modelo: MODEL
+        modelos: MODEL_CANDIDATES
   };
 
   try {
