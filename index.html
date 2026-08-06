@@ -162,7 +162,7 @@ footer{margin-top:60px;text-align:center;color:var(--dim);font-size:12px;line-he
           <input type="url" id="jobUrl" placeholder="https://empresa.com/vaga/...">
           <button class="btn btn-sec" onclick="fetchJob()">Buscar</button>
         </div>
-        <p class="hint">Alguns sites (LinkedIn, Gupy) bloqueiam leitura automática. Se falhar, use a aba "Colar texto".</p>
+        <p class="hint">Funciona bem para a maioria dos sites de vaga. Páginas que exigem login (comuns em alguns perfis do LinkedIn) podem bloquear a leitura — se falhar, use a aba "Colar texto".</p>
         <textarea id="jobUrlText" style="margin-top:10px;min-height:130px" placeholder="O conteúdo extraído do link aparecerá aqui — você pode editar antes de analisar."></textarea>
       </div>
     </div>
@@ -182,6 +182,11 @@ footer{margin-top:60px;text-align:center;color:var(--dim);font-size:12px;line-he
         <button onclick="clearFile(event)" title="Remover">✕</button>
       </div>
       <p class="hint">O arquivo é lido apenas no seu navegador e enviado somente para a API de análise.</p>
+      <div class="row" id="cvLinkRow" style="margin-top:12px">
+        <input type="url" id="cvUrl" placeholder="ou cole o link do seu perfil do LinkedIn/portfólio...">
+        <button class="btn btn-sec" onclick="fetchCvLink()">Buscar</button>
+      </div>
+      <p class="hint">Perfis do LinkedIn geralmente exigem login e podem bloquear a leitura automática. Se falhar, exporte o perfil como PDF e envie no campo acima.</p>
     </div>
 
     <div class="analyze-zone">
@@ -284,19 +289,33 @@ async function fetchJob(){
   if(!url){setErr('Informe a URL da vaga.');return}
   setErr(''); $('jobUrlText').value='Buscando conteúdo...';
   try{
-    const r=await fetch('https://api.allorigins.win/raw?url='+encodeURIComponent(url));
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const html=await r.text();
-    const doc=new DOMParser().parseFromString(html,'text/html');
-    doc.querySelectorAll('script,style,nav,footer,header,iframe,svg,noscript').forEach(n=>n.remove());
-    let txt=(doc.body?.innerText||'').replace(/\n{3,}/g,'\n\n').trim();
-    if(txt.length<200) throw new Error('conteúdo insuficiente');
-    $('jobUrlText').value=txt.slice(0,15000);
+    const r=await fetch('/api/fetch-link',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url})});
+    const data=await r.json().catch(()=>({error:'Resposta inválida do servidor.'}));
+    if(!r.ok||data.error) throw new Error(data.error||('HTTP '+r.status));
+    $('jobUrlText').value=data.text;
   }catch(e){
     $('jobUrlText').value='';
-    setErr('Não consegui ler esse link (o site provavelmente bloqueia leitura automática). Copie e cole a descrição na aba "Colar texto".');
+    setErr(e.message);
   }
 }
+
+  async function fetchCvLink(){
+    const url=$('cvUrl').value.trim();
+    if(!url){setErr('Informe o link do currículo ou perfil.');return}
+    setErr('');
+    try{
+      const r=await fetch('/api/fetch-link',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url})});
+      const data=await r.json().catch(()=>({error:'Resposta inválida do servidor.'}));
+      if(!r.ok||data.error) throw new Error(data.error||('HTTP '+r.status));
+      cvText=data.text; cvName=data.title||url;
+      $('fName').textContent=cvName;
+      $('fMeta').textContent=cvText.split(/\s+/).length+' palavras extraídas do link';
+      $('fileBadge').classList.add('show');
+      drop.style.display='none';
+    }catch(e){
+      setErr(e.message);
+    }
+  }
 
 // ---- CV upload ----
 const drop=$('drop'), fileIn=$('file');
@@ -335,7 +354,7 @@ async function handleFile(f){
     drop.style.display='none';
   }catch(e){ setErr('Erro ao ler o arquivo: '+e.message); }
 }
-function clearFile(e){ e.stopPropagation(); cvText='';cvName=''; $('fileBadge').classList.remove('show'); drop.style.display=''; fileIn.value=''; }
+function clearFile(e){ e.stopPropagation(); cvText='';cvName=''; $('fileBadge').classList.remove('show'); drop.style.display=''; fileIn.value=''; $('cvUrl').value=''; }
 
 // ---- Analyze ----
 function getJobText(){
