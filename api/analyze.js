@@ -44,12 +44,9 @@ async function callGemini(key, prompt) {
     generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' }
   });
 
-  // Chaves do AI Studio (AIza...) vão na query string.
-  // Tokens OAuth (AQ..., ya29...) vão no header Authorization.
-  const isApiKey = /^AIza/.test(key);
-  const url = isApiKey ? `${base}?key=${encodeURIComponent(key)}` : base;
-  const headers = { 'Content-Type': 'application/json' };
-  if (!isApiKey) headers['Authorization'] = `Bearer ${key}`;
+// A GEMINI_API_KEY é sempre uma chave de API do AI Studio — envia sempre via query string.
+    const url = `${base}?key=${encodeURIComponent(key)}`;
+    const headers = { 'Content-Type': 'application/json' };
 
   const r = await fetch(url, { method: 'POST', headers, body });
   const data = await r.json().catch(() => ({}));
