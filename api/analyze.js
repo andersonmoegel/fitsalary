@@ -41,7 +41,7 @@ async function callGeminiModel(key, prompt, model) {
     const base = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
     const body = JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' }
+          generationConfig: { temperature: 0.4, maxOutputTokens: 8192, responseMimeType: 'application/json' }
     });
 
     // A GEMINI_API_KEY é sempre uma chave de API do AI Studio — envia sempre via query string.
@@ -130,22 +130,27 @@ export default async function handler(req, res) {
     });
   }
 
-  try {
-    const { job, cvText, cvName } = req.body || {};
-    if (!job || job.length < 80) return res.status(400).json({ error: 'Descricao da vaga muito curta.' });
-    if (!cvText || cvText.length < 100) return res.status(400).json({ error: 'Curriculo nao reconhecido.' });
+try {
+      const { job, cvText, cvName } = req.body || {};
+      if (!job || job.length < 80) return res.status(400).json({ error: 'Descricao da vaga muito curta.' });
+      if (!cvText || cvText.length < 100) return res.status(400).json({ error: 'Curriculo nao reconhecido.' });
 
-    const raw = await callGemini(key, buildPrompt(job, cvText, cvName));
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) return res.status(502).json({ error: 'A IA respondeu em formato inesperado.' });
-
-    let parsed;
-    try {
-      parsed = JSON.parse(m[0]);
-    } catch {
-      return res.status(502).json({ error: 'Nao consegui interpretar a resposta da IA. Tente novamente.' });
-    }
-    return res.status(200).json(parsed);
+      const prompt = buildPrompt(job, cvText, cvName);
+      let parsed;
+      let attempts = 0;
+      while (!parsed && attempts < 2) {
+              attempts++;
+              const raw = await callGemini(key, prompt);
+              const m = raw.match(/\{[\s\S]*\}/);
+              if (!m) continue;
+              try {
+                        parsed = JSON.parse(m[0]);
+              } catch {
+                        parsed = undefined;
+              }
+      }
+      if (!parsed) return res.status(502).json({ error: 'Nao consegui interpretar a resposta da IA. Tente novamente.' });
+      return res.status(200).json(parsed);
   } catch (e) {
     const status = e.status === 401 || e.status === 403 ? 401 : 502;
     const hint = status === 401
